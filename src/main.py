@@ -126,7 +126,8 @@ def build_components(cfg: dict):
     risk_mgr._on_emergency = executor_obj.emergency_liquidate
 
     signal_gen = SignalGenerator(xgb_model, lstm_model, ensemble)
-    portfolio = PortfolioTracker(client, db)
+    mom_cfg = cfg.get("momentum", {})
+    portfolio = PortfolioTracker(client, db, eval_hold_sec=mom_cfg.get("evaluation_hold_sec", 900))
     universe = CoinUniverse(client)
     fetcher = HistoricalFetcher(client, db)
 

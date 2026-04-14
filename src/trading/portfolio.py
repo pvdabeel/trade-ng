@@ -28,6 +28,8 @@ class PositionInfo:
     is_open: bool
     strategy: str = "ml"
     fee: float = 0.0
+    opened_at: str | None = None
+    eval_hold_remaining: int | None = None
 
     def to_dict(self) -> dict:
         return {
@@ -44,6 +46,8 @@ class PositionInfo:
             "is_open": self.is_open,
             "strategy": self.strategy,
             "fee": self.fee,
+            "opened_at": self.opened_at,
+            "eval_hold_remaining": self.eval_hold_remaining,
         }
 
 
@@ -60,9 +64,10 @@ class PortfolioSummary:
 class PortfolioTracker:
     """Tracks portfolio state by combining DB positions with live prices."""
 
-    def __init__(self, client: CoinbaseClient, db: Database):
+    def __init__(self, client: CoinbaseClient, db: Database, eval_hold_sec: int = 900):
         self.client = client
         self.db = db
+        self._eval_hold_sec = eval_hold_sec
 
     def get_summary(self, prices: dict[str, float] | None = None) -> PortfolioSummary:
         """Build a full portfolio summary with current prices."""
@@ -105,6 +110,15 @@ class PortfolioTracker:
                 else 0
             )
 
+            opened_iso = None
+            eval_remaining = None
+            if pos.opened_at:
+                opened_iso = pos.opened_at.isoformat()
+                age = (dt.datetime.utcnow() - pos.opened_at).total_seconds()
+                remaining = self._eval_hold_sec - age
+                if remaining > 0:
+                    eval_remaining = int(remaining)
+
             info = PositionInfo(
                 product_id=pos.product_id,
                 side=pos.side,
@@ -120,6 +134,8 @@ class PortfolioTracker:
                 is_open=True,
                 strategy=getattr(pos, "strategy", "ml") or "ml",
                 fee=fee_by_product.get(pos.product_id, 0.0),
+                opened_at=opened_iso,
+                eval_hold_remaining=eval_remaining,
             )
             position_infos.append(info)
             total_holdings += value

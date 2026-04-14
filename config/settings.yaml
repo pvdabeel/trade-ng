@@ -58,6 +58,8 @@ momentum:
   take_profit_pct: 0.04         # 4% take profit from entry (lock in wins earlier)
   hard_stop_pct: 0.04           # 4% hard stop-loss from entry (more breathing room)
   max_hold_minutes: 90          # auto-close after 90 min (cut losers faster)
+  evaluation_hold_sec: 900      # hold 15 min before allowing exits (aligns with decision evaluation)
+  catastrophic_stop_pct: 0.10   # hard floor during eval hold (-10% from entry)
   min_volume_usd: 500000        # minimum 24h volume for candidates
   scale_in_min_change_pct: 0.10 # 10%+ hourly change triggers gradual scale-in
   scale_in_initial_pct: 0.5    # first buy = 25% of normal budget

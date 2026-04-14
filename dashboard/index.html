@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Trade-ng Dashboard</title>
-  <link rel="stylesheet" href="style.css?v=22">
+  <link rel="stylesheet" href="style.css?v=24">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
@@ -211,9 +211,10 @@
         <div class="stat-item"><span class="stat-label">Total Trades</span><span id="mom-trades" class="stat-value">--</span></div>
       </div>
       <div class="confidence-bar" id="confidence-bar"></div>
+      <div class="yield-summary" id="yield-summary"></div>
       <div class="confidence-chart-wrap">
         <div class="chart-header">
-          <h2>Decision Confidence</h2>
+          <h2>Decision Confidence &amp; Yield</h2>
           <div class="chart-controls">
             <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
           </div>
@@ -263,6 +264,7 @@
             <th>Hourly</th>
             <th>Outcome</th>
             <th>After</th>
+            <th>Yield</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -330,6 +332,6 @@
     </div>
   </main>
 
-  <script src="app.js?v=40"></script>
+  <script src="app.js?v=42"></script>
 </body>
 </html>

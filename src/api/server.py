@@ -25,7 +25,8 @@ def create_app(cfg: dict | None = None) -> FastAPI:
     db_path = cfg.get("database", {}).get("path", "data/trade.db")
     client = CoinbaseClient()
     db = Database(db_path)
-    portfolio = PortfolioTracker(client, db)
+    mom_cfg = cfg.get("momentum", {})
+    portfolio = PortfolioTracker(client, db, eval_hold_sec=mom_cfg.get("evaluation_hold_sec", 900))
 
     fx_cfg = cfg.get("fx", {})
     fx_mgr = None

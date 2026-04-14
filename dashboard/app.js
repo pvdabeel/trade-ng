@@ -263,7 +263,13 @@ function updatePositions(positions) {
   }
   for (const p of positions) {
     const pnlClass = p.unrealized_pnl >= 0 ? 'positive' : 'negative';
-    const strat = (p.strategy === 'momentum') ? ' <span class="badge badge-on" style="font-size:0.6rem;padding:0.1rem 0.4rem;">MOM</span>' : '';
+    let strat = (p.strategy === 'momentum') ? ' <span class="badge badge-on" style="font-size:0.6rem;padding:0.1rem 0.4rem;">MOM</span>' : '';
+    if (p.eval_hold_remaining != null && p.eval_hold_remaining > 0) {
+      const mins = Math.floor(p.eval_hold_remaining / 60);
+      const secs = p.eval_hold_remaining % 60;
+      const ts = mins > 0 ? `${mins}m${String(secs).padStart(2,'0')}s` : `${secs}s`;
+      strat += ` <span class="badge-eval-hold" title="Evaluation hold: exits suppressed">${ts}</span>`;
+    }
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><strong class="coin-link" data-pid="${p.product_id}">${p.product_id}</strong>${strat}</td>
@@ -1181,8 +1187,37 @@ async function updateMomentum() {
       : '<span class="confidence-detail">No decision history yet</span>';
   }
 
-  // Confidence evolution chart (learning curve)
+  // Yield summary
+  const yieldDiv = $('#yield-summary');
+  if (yieldDiv) {
+    const ys = conf.yield_stats;
+    if (ys && ys.total_trades > 0) {
+      const avgCls = ys.avg_yield_pct >= 0 ? 'positive' : 'negative';
+      const wrCls = ys.win_rate >= 0.5 ? 'confidence-high' : 'confidence-low';
+      const avgMin = ys.avg_hold_sec > 0 ? Math.round(ys.avg_hold_sec / 60) : '--';
+      let exitParts = '';
+      for (const [reason, info] of Object.entries(ys.by_exit || {})) {
+        const eCls = info.avg_pct >= 0 ? 'positive' : 'negative';
+        exitParts += `<span class="yield-exit-item">${reason}: <span class="${eCls}">${(info.avg_pct * 100).toFixed(1)}%</span> (${info.count})</span> `;
+      }
+      yieldDiv.innerHTML =
+        `<div class="yield-row">` +
+        `<span class="yield-item">Avg Yield: <span class="${avgCls}">${(ys.avg_yield_pct * 100).toFixed(2)}%</span></span>` +
+        `<span class="yield-item">Win Rate: <span class="${wrCls}">${(ys.win_rate * 100).toFixed(0)}%</span></span>` +
+        `<span class="yield-item">Trades: ${ys.total_trades}</span>` +
+        `<span class="yield-item">Avg Hold: ${avgMin}min</span>` +
+        `<span class="yield-item">Best: <span class="positive">${(ys.best_pct * 100).toFixed(1)}%</span></span>` +
+        `<span class="yield-item">Worst: <span class="negative">${(ys.worst_pct * 100).toFixed(1)}%</span></span>` +
+        `</div>` +
+        (exitParts ? `<div class="yield-row yield-exits">${exitParts}</div>` : '');
+    } else {
+      yieldDiv.innerHTML = '';
+    }
+  }
+
+  // Confidence + yield evolution chart
   const series = (conf.series || []);
+  const yieldSeries = (conf.yield_series || []);
   const confChartWrap = document.querySelector('.confidence-chart-wrap');
   if (series.length >= 2) {
     if (confChartWrap) confChartWrap.style.display = '';
@@ -1197,11 +1232,31 @@ async function updateMomentum() {
       s.outcome === 'correct' ? 'rgba(34,197,94,0.9)' : 'rgba(239,68,68,0.9)'
     );
 
+    // Build yield scatter data aligned to same timestamp axis
+    const yieldPoints = [];
+    if (yieldSeries.length > 0) {
+      for (const ys of yieldSeries) {
+        let bestIdx = 0, bestDist = Infinity;
+        for (let i = 0; i < series.length; i++) {
+          const dist = Math.abs(series[i].timestamp - ys.timestamp);
+          if (dist < bestDist) { bestDist = dist; bestIdx = i; }
+        }
+        yieldPoints.push({ x: bestIdx, y: ys.yield_pct * 100 });
+      }
+    }
+    const yieldScatter = seriesLabels.map((_, i) => {
+      const pt = yieldPoints.find(p => p.x === i);
+      return pt ? pt.y : null;
+    });
+
     if (confidenceChart) {
       confidenceChart.data.labels = seriesLabels;
       confidenceChart.data.datasets[0].data = accuracyData;
       confidenceChart.data.datasets[0].pointBackgroundColor = pointColors;
       confidenceChart.data.datasets[1].data = confTrend;
+      if (confidenceChart.data.datasets.length > 2) {
+        confidenceChart.data.datasets[2].data = yieldScatter;
+      }
       confidenceChart.update('none');
     } else {
       const ctx = $('#confidence-chart');
@@ -1220,6 +1275,7 @@ async function updateMomentum() {
               pointBackgroundColor: pointColors,
               pointBorderWidth: 0,
               tension: 0.3,
+              yAxisID: 'y',
             }, {
               label: 'Trend',
               data: confTrend,
@@ -1229,18 +1285,48 @@ async function updateMomentum() {
               pointRadius: 0,
               fill: false,
               tension: 0,
+              yAxisID: 'y',
+            }, {
+              label: 'Yield',
+              data: yieldScatter,
+              borderColor: 'rgba(168,85,247,0.6)',
+              borderWidth: 0,
+              pointRadius: 5,
+              pointStyle: 'rectRot',
+              pointBackgroundColor: yieldScatter.map(v => v != null && v >= 0 ? 'rgba(34,197,94,0.8)' : 'rgba(239,68,68,0.8)'),
+              fill: false,
+              showLine: false,
+              yAxisID: 'y2',
+              spanGaps: false,
             }]
           },
-          options: makeChartOpts({
-            min: 0,
-            max: 100,
-            ticks: {
-              color: '#8b8fa3',
-              font: { size: 10 },
-              callback: v => v + '%',
-              stepSize: 25,
+          options: {
+            ...makeChartOpts({
+              min: 0,
+              max: 100,
+              ticks: {
+                color: '#8b8fa3',
+                font: { size: 10 },
+                callback: v => v + '%',
+                stepSize: 25,
+              },
+            }),
+            scales: {
+              ...makeChartOpts({}).scales,
+              y: {
+                min: 0, max: 100,
+                ticks: { color: '#8b8fa3', font: { size: 10 }, callback: v => v + '%', stepSize: 25 },
+                grid: { color: 'rgba(255,255,255,0.04)' },
+                title: { display: true, text: 'Accuracy', color: '#8b8fa3', font: { size: 10 } },
+              },
+              y2: {
+                position: 'right',
+                ticks: { color: '#a855f7', font: { size: 10 }, callback: v => v.toFixed(1) + '%' },
+                grid: { drawOnChartArea: false },
+                title: { display: true, text: 'Yield', color: '#a855f7', font: { size: 10 } },
+              },
             },
-          })
+          },
         });
       }
     }
@@ -1429,7 +1515,7 @@ async function updateMomentum() {
     const dlFrag = document.createDocumentFragment();
     if (!recent.length) {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td colspan="7" style="color:var(--text-muted);text-align:center;">No decisions recorded yet</td>';
+      tr.innerHTML = '<td colspan="8" style="color:var(--text-muted);text-align:center;">No decisions recorded yet</td>';
       dlFrag.appendChild(tr);
     } else {
       for (const r of recent) {
@@ -1455,6 +1541,13 @@ async function updateMomentum() {
           const cls = r.price_change_pct >= 0 ? 'positive' : 'negative';
           afterHtml = `<span class="${cls}">${r.price_change_pct >= 0 ? '+' : ''}${pctVal}%</span>`;
         }
+        let yieldHtml = '--';
+        if (r.realized_pnl_pct != null) {
+          const yPct = (r.realized_pnl_pct * 100).toFixed(1);
+          const yCls = r.realized_pnl_pct >= 0 ? 'positive' : 'negative';
+          const exitTag = r.exit_reason ? ` <span style="font-size:0.65rem;color:var(--text-muted)">${r.exit_reason}</span>` : '';
+          yieldHtml = `<span class="${yCls}">${r.realized_pnl_pct >= 0 ? '+' : ''}${yPct}%</span>${exitTag}`;
+        }
         const hourlyPct = (r.hourly_change_pct * 100).toFixed(1);
         const tr = document.createElement('tr');
         tr.innerHTML = `
@@ -1465,6 +1558,7 @@ async function updateMomentum() {
           <td class="mono positive">+${hourlyPct}%</td>
           <td>${outcomeHtml}</td>
           <td class="mono">${afterHtml}</td>
+          <td class="mono">${yieldHtml}</td>
         `;
         dlFrag.appendChild(tr);
       }

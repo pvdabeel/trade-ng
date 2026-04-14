@@ -611,6 +611,42 @@ tr:hover td { background: rgba(91,127,255,0.04); }
   border-left: 1px solid var(--border);
 }
 
+/* --- Yield summary --- */
+.yield-summary {
+  padding: 0.4rem 0;
+}
+.yield-row {
+  display: flex;
+  gap: 1.25rem;
+  flex-wrap: wrap;
+  align-items: center;
+  font-size: 0.75rem;
+}
+.yield-item {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.yield-exits {
+  margin-top: 0.15rem;
+  font-size: 0.7rem;
+}
+.yield-exit-item {
+  color: var(--text-muted);
+  padding-right: 0.5rem;
+}
+
+.badge-eval-hold {
+  display: inline-block;
+  font-size: 0.6rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(168, 85, 247, 0.2);
+  color: #a855f7;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+}
+
 .confidence-chart-wrap {
   margin: 0.75rem 0;
   padding: 0.75rem;

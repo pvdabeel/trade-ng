@@ -44,6 +44,8 @@ class MomentumConfig:
     hard_stop_pct: float = 0.03
     max_hold_minutes: int = 120
     min_hold_seconds: int = 120
+    evaluation_hold_sec: int = 900
+    catastrophic_stop_pct: float = 0.10
     min_volume_usd: float = 500_000
     # Scale-in: gradual entry for very large moves
     scale_in_min_change_pct: float = 0.10
@@ -116,6 +118,10 @@ class _DecisionRecord:
     price_after_1h: float | None = None
     price_after_2h: float | None = None
     outcome: str | None = None   # "correct" | "incorrect" | None
+    realized_pnl_pct: float | None = None
+    exit_reason: str | None = None
+    hold_seconds: int | None = None
+    entry_fee_pct: float | None = None
 
 
 @dataclass
@@ -562,10 +568,50 @@ class MomentumScanner:
                 "outcome": r.outcome,
             })
 
+        # Yield stats for "enter" decisions with realized outcomes
+        entered = [r for r in records
+                   if r.decision == "enter" and r.realized_pnl_pct is not None]
+        if entered:
+            yields = [r.realized_pnl_pct for r in entered]
+            wins = [y for y in yields if y > 0]
+            losses = [y for y in yields if y <= 0]
+            hold_times = [r.hold_seconds for r in entered if r.hold_seconds is not None]
+            by_exit: dict[str, list[float]] = {}
+            for r in entered:
+                key = r.exit_reason or "unknown"
+                by_exit.setdefault(key, []).append(r.realized_pnl_pct)
+            yield_stats: dict = {
+                "avg_yield_pct": round(sum(yields) / len(yields), 4),
+                "median_yield_pct": round(sorted(yields)[len(yields) // 2], 4),
+                "win_rate": round(len(wins) / len(yields), 3),
+                "total_trades": len(yields),
+                "avg_hold_sec": round(sum(hold_times) / len(hold_times)) if hold_times else 0,
+                "best_pct": round(max(yields), 4),
+                "worst_pct": round(min(yields), 4),
+                "by_exit": {
+                    k: {"avg_pct": round(sum(v) / len(v), 4), "count": len(v)}
+                    for k, v in by_exit.items()
+                },
+            }
+            yield_series = [
+                {"timestamp": r.timestamp, "yield_pct": r.realized_pnl_pct}
+                for r in sorted(entered, key=lambda r: r.timestamp)
+            ]
+        else:
+            yield_stats = {
+                "avg_yield_pct": None, "median_yield_pct": None,
+                "win_rate": None, "total_trades": 0,
+                "avg_hold_sec": 0, "best_pct": None, "worst_pct": None,
+                "by_exit": {},
+            }
+            yield_series = []
+
         return {
             "coins": coins,
             "overall": overall,
             "series": series,
+            "yield_stats": yield_stats,
+            "yield_series": yield_series,
             "recent": [
                 {
                     "product_id": r.product_id,
@@ -578,6 +624,9 @@ class MomentumScanner:
                         ((r.price_after_2h or r.price_after_1h or r.price_after_15m or r.price)
                          - r.price) / r.price, 4
                     ) if r.price > 0 else None,
+                    "realized_pnl_pct": r.realized_pnl_pct,
+                    "exit_reason": r.exit_reason,
+                    "hold_seconds": r.hold_seconds,
                 }
                 for r in recent
             ],
@@ -1862,17 +1911,30 @@ class MomentumScanner:
             if current_price <= 0:
                 continue
 
-            # Skip exit checks during the initial hold period to avoid
-            # selling on normal post-entry volatility
+            age_secs = 0.0
             if pos.opened_at:
                 age_secs = (dt.datetime.utcnow() - pos.opened_at).total_seconds()
-                if age_secs < self.cfg.min_hold_seconds:
-                    continue
 
-            # Update highest price
+            in_eval_hold = age_secs < self.cfg.evaluation_hold_sec
+
+            # During evaluation hold: only allow catastrophic stop (e.g. -10%)
+            # After evaluation hold: normal exit management
+            if in_eval_hold:
+                catastrophic_price = pos.entry_price * (1 - self.cfg.catastrophic_stop_pct)
+                if current_price <= catastrophic_price:
+                    exit_reason = f"catastrophic-stop (eval hold, {self.cfg.catastrophic_stop_pct:.0%} drop)"
+                    is_loss = True
+                    self._exit_momentum(pos, current_price, exit_reason)
+                    self._add_cooldown(pos.product_id, exit_reason)
+                else:
+                    # Still track highest price during eval hold
+                    if current_price > (pos.highest_price or 0):
+                        self.db.update_position(pos.product_id, highest_price=current_price)
+                continue
+
+            # Update highest price and trailing stop (post eval-hold)
             if current_price > (pos.highest_price or 0):
                 self.db.update_position(pos.product_id, highest_price=current_price)
-                # Update trailing stop
                 trailing_stop = current_price * (1 - self.cfg.trailing_stop_pct)
                 if trailing_stop > (pos.stop_loss or 0):
                     self.db.update_position(pos.product_id, stop_loss=trailing_stop)
@@ -1890,7 +1952,7 @@ class MomentumScanner:
 
             # Time cap
             elif pos.opened_at:
-                age_minutes = (dt.datetime.utcnow() - pos.opened_at).total_seconds() / 60
+                age_minutes = age_secs / 60
                 if age_minutes >= self.cfg.max_hold_minutes:
                     exit_reason = f"time-cap ({int(age_minutes)}min)"
 
@@ -1943,10 +2005,39 @@ class MomentumScanner:
             self.db.close_position(product_id, net_pnl)
             with self._lock:
                 self._stats.total_trades += 1
+            self._record_yield(position, current_price, reason, net_pnl, taker_fee)
             if self.fx:
                 self.fx.rebalance_to_eurc()
         except Exception as e:
             logger.error("Momentum exit failed %s: %s", product_id, e)
+
+    def _record_yield(
+        self, position: Position, exit_price: float,
+        reason: str, net_pnl: float, exit_fee: float,
+    ) -> None:
+        """Link a closed position back to its enter decision record."""
+        entry_value = position.entry_price * position.size
+        if entry_value <= 0:
+            return
+        pnl_pct = round(net_pnl / entry_value, 4)
+        hold_sec = 0
+        if position.opened_at:
+            hold_sec = int((dt.datetime.utcnow() - position.opened_at).total_seconds())
+        fee_pct = round((exit_fee * 2) / entry_value, 4)  # approximate round-trip
+
+        matched = False
+        for rec in reversed(self._decision_log):
+            if (rec.product_id == position.product_id
+                    and rec.decision == "enter"
+                    and rec.realized_pnl_pct is None):
+                rec.realized_pnl_pct = pnl_pct
+                rec.exit_reason = reason
+                rec.hold_seconds = hold_sec
+                rec.entry_fee_pct = fee_pct
+                matched = True
+                break
+        if matched:
+            self._save_decision_log()
 
     # ------------------------------------------------------------------
     # Order / formatting helpers (reuse executor patterns)
