@@ -481,28 +481,43 @@ class MomentumScanner:
 
     @staticmethod
     def _evaluate_decision(rec: _DecisionRecord) -> str:
-        """Grade a past decision based on subsequent price movement."""
+        """Grade a past decision based on subsequent price movement.
+
+        For a momentum strategy, the key question is: did we make money
+        if we entered, and did we avoid a loss if we didn't?
+        """
         ref = rec.price_after_2h or rec.price_after_1h or rec.price_after_15m
         if ref is None or rec.price <= 0:
             return "unknown"
         change = (ref - rec.price) / rec.price
 
         if rec.decision == "enter":
-            return "correct" if change > 0 else "incorrect"
+            # Correct if still above entry after trailing-stop distance (~2%)
+            return "correct" if change > -0.02 else "incorrect"
+
         if rec.decision == "skip":
-            return "correct" if change < 0.01 else "incorrect"
+            # Correct if it didn't go up much (we didn't miss out)
+            return "correct" if change < 0.03 else "incorrect"
+
         if rec.decision == "wait":
+            # Correct if the price dipped first (we could enter lower)
+            # OR if it didn't run away from us
             if rec.price_after_15m and rec.price > 0:
                 dip = (rec.price_after_15m - rec.price) / rec.price
-                if dip < -0.005:
+                if dip < -0.01:
                     return "correct"
-            later = rec.price_after_1h or rec.price_after_2h
-            if later and rec.price > 0:
-                if (later - rec.price) / rec.price > 0.02:
-                    return "incorrect"
-            return "correct" if change < 0.005 else "incorrect"
+            # Incorrect only if it ran significantly without us
+            return "correct" if change < 0.03 else "incorrect"
+
         if rec.decision == "pullback_watch":
-            return "correct" if change < 0 else "incorrect"
+            # Correct if there was any dip (pullback materialized)
+            if rec.price_after_15m and rec.price > 0:
+                dip = (rec.price_after_15m - rec.price) / rec.price
+                if dip < -0.01:
+                    return "correct"
+            # Also correct if it didn't keep running
+            return "correct" if change < 0.03 else "incorrect"
+
         return "unknown"
 
     def get_confidence_scores(self) -> dict:
@@ -897,61 +912,59 @@ class MomentumScanner:
     ) -> tuple[str, str]:
         """Return (signal, reason) based on combined indicators.
 
-        When hourly_change_pct is high (strong momentum), thresholds are
-        relaxed — a surging coin naturally sits high in its range with
-        elevated RSI, and that is *expected* rather than a reason to wait.
+        Momentum candidates are coins already moving up 5%+/hour.  The
+        decision should lean towards entering because that is the whole
+        point of the momentum strategy — catch moves in progress.
+        Overly conservative filters cause most candidates to be "waited"
+        on while they keep running, tanking decision confidence.
         """
-        strong_momentum = hourly_change_pct >= 0.08  # ≥8 %
-        very_strong      = hourly_change_pct >= 0.12  # ≥12 %
-
-        # Hard skip: extremely overbought
-        if rsi > 75 and range_pos > 0.85 and not very_strong:
+        # Hard skip: extremely overbought on every metric
+        if rsi > 80 and range_pos > 0.90:
             return "skip", f"overbought (RSI={rsi:.0f}, range={range_pos:.0%})"
 
-        # At the absolute peak with no pullback — wait (unless strong momentum)
-        if range_pos > 0.80 and pullback < 0.02 and rsi > 65 and not strong_momentum:
-            return "wait", f"at peak (range={range_pos:.0%}, RSI={rsi:.0f}), waiting for pullback"
-
-        # Strong momentum (>8%): defer to pullback re-entry instead of chasing
-        if strong_momentum and trend > 0:
+        # Very large hourly move (>20%): defer to pullback to avoid buying the top
+        if hourly_change_pct >= 0.20:
             return "pullback_watch", (
-                f"strong mover — watching for pullback (hourly=+{hourly_change_pct:.1%}, "
-                f"trend=+{trend:.1%}, RSI={rsi:.0f})"
+                f"very large move — watching for pullback (hourly=+{hourly_change_pct:.1%})"
             )
 
-        # Cap: if hourly change > 15%, always pullback_watch even if not "strong"
-        if hourly_change_pct >= 0.15:
-            return "pullback_watch", (
-                f"large hourly move — watching for pullback (hourly=+{hourly_change_pct:.1%})"
-            )
+        # Volume check: only skip if volume is very low
+        if volume_ratio < 0.5:
+            return "wait", f"very low volume (vol_ratio={volume_ratio:.1f}x)"
 
-        # Volume confirmation: require higher volume for bigger moves
-        min_vol = 1.2 if hourly_change_pct >= 0.10 else 0.8
-        if volume_ratio < min_vol:
-            return "wait", f"low volume (vol_ratio={volume_ratio:.1f}x), waiting for conviction"
+        # --- Entry conditions (ordered from strongest to weakest) ---
 
-        # Trend confirmation: require positive short-term trend for all entries
-        if trend <= 0:
-            return "wait", f"negative trend ({trend:+.1%}), waiting for upturn"
-
-        # Good entry: pullback from the high
-        if pullback >= 0.04 and range_pos < 0.60:
+        # Pullback entry: dipped from high and still in lower range
+        if pullback >= 0.03 and range_pos < 0.70:
             return "enter", f"pullback {pullback:.1%} from high, range={range_pos:.0%}"
 
-        # Good entry: lower part of range with upward trend
-        if range_pos < 0.40 and trend > 0.005:
-            return "enter", f"early in move (range={range_pos:.0%}, trend=+{trend:.1%})"
+        # Trend-confirmed entry: positive trend with reasonable range
+        if trend > 0 and range_pos < 0.75 and rsi < 70:
+            return "enter", f"trend-confirmed (range={range_pos:.0%}, RSI={rsi:.0f}, trend=+{trend:.1%})"
 
-        # Good entry: mid-range with moderate RSI and positive trend
-        if 0.25 <= range_pos <= 0.55 and rsi < 55 and trend > 0.005:
-            return "enter", f"mid-range entry (range={range_pos:.0%}, RSI={rsi:.0f})"
+        # Strong mover with positive trend: enter, don't wait
+        if hourly_change_pct >= 0.08 and trend > 0 and rsi < 75:
+            return "enter", f"strong momentum entry (hourly=+{hourly_change_pct:.1%}, RSI={rsi:.0f})"
 
-        # Upper range — wait
-        if range_pos > 0.60:
-            return "wait", f"high in range ({range_pos:.0%}), waiting for dip"
+        # Mid-range entry: moderate position with any positive trend
+        if 0.20 <= range_pos <= 0.65 and trend > 0:
+            return "enter", f"mid-range entry (range={range_pos:.0%}, trend=+{trend:.1%})"
 
-        # Default: wait (be selective, don't chase)
-        return "wait", f"insufficient conviction (range={range_pos:.0%}, RSI={rsi:.0f}, trend={trend:+.1%})"
+        # High in range but with pullback underway: watch for re-entry
+        if range_pos > 0.75 and pullback < 0.02 and rsi > 65:
+            return "pullback_watch", (
+                f"near peak — watching for pullback (range={range_pos:.0%}, RSI={rsi:.0f})"
+            )
+
+        # Negative trend: wait briefly
+        if trend <= -0.005:
+            return "wait", f"negative trend ({trend:+.1%}), waiting for upturn"
+
+        # Default: enter with a note (momentum candidates deserve the benefit of the doubt)
+        if trend >= 0:
+            return "enter", f"momentum entry (range={range_pos:.0%}, RSI={rsi:.0f}, trend={trend:+.1%})"
+
+        return "wait", f"weak setup (range={range_pos:.0%}, RSI={rsi:.0f}, trend={trend:+.1%})"
 
     # ------------------------------------------------------------------
     # Candidate report (rich per-coin log)
