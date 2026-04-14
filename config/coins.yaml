@@ -1,0 +1,33 @@
+# Coin universe configuration
+# Set mode to "auto" to discover all available USD pairs on Coinbase,
+# or "manual" to trade only the coins listed below.
+
+mode: auto
+
+# Minimum 24h volume filter (in USD) for auto-discovered coins
+min_volume_usd: 100000
+
+# Coins to exclude even in auto mode
+exclude:
+  - USDT-USD
+  - DAI-USD
+  - USDC-USD
+  - EURC-USD
+  - PYUSD-USD
+  - GUSD-USD
+  - PAX-USD
+  - USD1-USD
+  - USDS-USD
+
+# Manual coin list (used when mode: manual)
+manual_coins:
+  - BTC-USD
+  - ETH-USD
+  - SOL-USD
+  - DOGE-USD
+  - ADA-USD
+  - AVAX-USD
+  - LINK-USD
+  - DOT-USD
+  - MATIC-USD
+  - UNI-USD

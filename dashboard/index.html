@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trade-ng Dashboard</title>
+  <link rel="stylesheet" href="style.css?v=22">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3"></script>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+</head>
+<body>
+  <header>
+    <h1>Trade-ng</h1>
+    <div class="header-center">
+      <div class="currency-toggle" id="global-currency-toggle">
+        <button data-currency="USD" class="currency-btn active">$</button>
+        <button data-currency="EUR" class="currency-btn">&euro;</button>
+      </div>
+      <div class="time-selector" id="global-time-selector">
+        <button data-hours="1" class="time-btn active">1H</button>
+        <button data-hours="2" class="time-btn">2H</button>
+        <button data-hours="4" class="time-btn">4H</button>
+        <button data-hours="8" class="time-btn">8H</button>
+        <button data-hours="24" class="time-btn">1D</button>
+        <button data-hours="168" class="time-btn">1W</button>
+        <button data-hours="720" class="time-btn">1M</button>
+        <button data-hours="8760" class="time-btn">1Y</button>
+        <button data-hours="0" class="time-btn">All</button>
+      </div>
+    </div>
+    <div class="header-right">
+      <span id="fx-rate" class="fx-pill">EUR/USD --</span>
+      <span id="status-badge" class="badge badge-ok">Connected</span>
+    </div>
+  </header>
+
+  <main>
+    <!-- Top cards row -->
+    <section class="cards">
+      <div class="card">
+        <div class="card-label">Portfolio</div>
+        <div class="card-value" id="total-value">$--</div>
+        <div class="card-trend" id="trend-total-value"></div>
+      </div>
+      <div class="card">
+        <div class="card-label">Cash (Total)</div>
+        <div class="card-value" id="cash-total">$--</div>
+        <div class="card-trend" id="trend-cash-total"></div>
+        <div class="card-sub" id="cash-usdc-line">USDC: $--</div>
+        <div class="card-sub" id="cash-eurc-line">EURC: --</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Holdings</div>
+        <div class="card-value" id="holdings-value">$--</div>
+        <div class="card-trend" id="trend-holdings"></div>
+        <div class="card-sub" id="holdings-usd-line">USD: $--</div>
+        <div class="card-sub" id="holdings-eur-line">EUR: --</div>
+      </div>
+      <div class="card">
+        <div class="card-label">Unrealized P&amp;L</div>
+        <div class="card-value" id="pnl-value">$--</div>
+        <div class="card-trend" id="trend-pnl"></div>
+      </div>
+      <div class="card">
+        <div class="card-label">Drawdown</div>
+        <div class="card-value" id="drawdown-value">--%</div>
+        <div class="card-trend" id="trend-drawdown"></div>
+      </div>
+      <div class="card">
+        <div class="card-label">Capital Floor</div>
+        <div class="card-value" id="floor-value">$--</div>
+        <div class="card-trend" id="trend-floor"></div>
+      </div>
+      <div class="card">
+        <div class="card-label">USD Exposure</div>
+        <div class="card-value" id="usd-exposure">--%</div>
+        <div class="card-trend" id="trend-exposure"></div>
+      </div>
+    </section>
+
+    <!-- Positions -->
+    <section class="table-section">
+      <div class="positions-header">
+        <h2>Open Positions</h2>
+        <span id="sync-indicator" class="sync-indicator" title="Auto-sync active"></span>
+        <button id="btn-sync" class="btn-sync" title="Sync positions with Coinbase">Sync</button>
+      </div>
+      <table id="positions-table">
+        <thead>
+          <tr>
+            <th>Coin</th>
+            <th>Entry</th>
+            <th>Current</th>
+            <th>Size</th>
+            <th>Value</th>
+            <th>P&amp;L</th>
+            <th>P&amp;L %</th>
+            <th>Stop</th>
+            <th>Target</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Charts row: equity + drawdown side by side -->
+    <section class="charts-row">
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>Equity Curve</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="equity-chart"></canvas>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>Drawdown</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="drawdown-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- P&L by strategy -->
+    <section class="charts-row charts-row--single">
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>P&amp;L by Strategy</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="strategy-chart"></canvas>
+        <div class="strat-stats" id="strat-stats"></div>
+      </div>
+    </section>
+
+    <!-- Performance attribution + Crypto Confidence -->
+    <section class="charts-row">
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>Performance Attribution</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="performance-chart"></canvas>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>Crypto Confidence</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="benchmark-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- FX charts row -->
+    <section class="charts-row">
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>EUR / USD Split</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="currency-chart"></canvas>
+        <div class="fx-details fx-details-compact" id="fx-details">
+          <div class="fx-row"><span>EURC</span><span id="fx-eurc">--</span></div>
+          <div class="fx-row"><span>USDC</span><span id="fx-usdc">--</span></div>
+          <div class="fx-row"><span>USD Exp</span><span id="fx-exposure">--</span></div>
+          <div class="fx-row"><span>Fee</span><span id="fx-fee">--</span></div>
+        </div>
+      </div>
+      <div class="chart-panel">
+        <div class="chart-header">
+          <h2>EUR/USD Rate</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="fx-evolution-chart"></canvas>
+      </div>
+    </section>
+
+    <!-- Momentum panel -->
+    <section class="momentum-section" id="momentum-section">
+      <div class="momentum-header">
+        <h2>Momentum Strategy</h2>
+        <div class="momentum-controls">
+          <span id="momentum-status" class="badge badge-off">INACTIVE</span>
+          <button id="momentum-toggle" class="btn-momentum">Start</button>
+          <button id="momentum-scan-now" class="btn-momentum" style="display:none;">Scan Now</button>
+          <button id="momentum-close-all" class="btn-close-all" style="display:none;">Close All</button>
+        </div>
+      </div>
+      <div class="momentum-stats">
+        <div class="stat-item"><span class="stat-label">Last Scan</span><span id="mom-last-scan" class="stat-value">--</span></div>
+        <div class="stat-item"><span class="stat-label">Coins Scanned</span><span id="mom-scanned" class="stat-value">--</span></div>
+        <div class="stat-item"><span class="stat-label">Candidates</span><span id="mom-candidates" class="stat-value">--</span></div>
+        <div class="stat-item"><span class="stat-label">Open Positions</span><span id="mom-positions" class="stat-value">--</span></div>
+        <div class="stat-item"><span class="stat-label">Total Trades</span><span id="mom-trades" class="stat-value">--</span></div>
+      </div>
+      <div class="confidence-bar" id="confidence-bar"></div>
+      <div class="confidence-chart-wrap">
+        <div class="chart-header">
+          <h2>Decision Confidence</h2>
+          <div class="chart-controls">
+            <button class="btn-fullscreen" title="Toggle fullscreen">&#x26F6;</button>
+          </div>
+        </div>
+        <canvas id="confidence-chart"></canvas>
+      </div>
+      <h3 class="mom-subtitle">Watching</h3>
+      <table id="momentum-watchlist" class="momentum-positions-table">
+        <thead>
+          <tr>
+            <th>Coin</th>
+            <th>Change</th>
+            <th>Price</th>
+            <th>RSI</th>
+            <th>Range</th>
+            <th>Trend</th>
+            <th>Signal</th>
+            <th>Progress</th>
+            <th>Watching</th>
+            <th>TTL</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <h3 class="mom-subtitle">Open Positions</h3>
+      <table id="momentum-table" class="momentum-positions-table">
+        <thead>
+          <tr>
+            <th>Coin</th>
+            <th>Entry</th>
+            <th>Stop</th>
+            <th>Target</th>
+            <th>Age</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <h3 class="mom-subtitle">Recent Decisions</h3>
+      <table id="decision-log-table" class="momentum-positions-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Coin</th>
+            <th>Signal</th>
+            <th>Price</th>
+            <th>Hourly</th>
+            <th>Outcome</th>
+            <th>After</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Recent trades -->
+    <section class="table-section">
+      <div class="positions-header">
+        <h2>Recent Trades</h2>
+        <button id="btn-sync-trades" class="btn-sync" title="Import trades from Coinbase">Sync</button>
+      </div>
+      <table id="trades-table">
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Coin</th>
+            <th>Side</th>
+            <th>Price</th>
+            <th>Value</th>
+            <th>Fee</th>
+            <th>P&amp;L</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Blocklist -->
+    <section class="table-section" id="blocklist-section">
+      <div class="positions-header">
+        <h2>Blocked Coins</h2>
+      </div>
+      <table id="blocklist-table">
+        <thead>
+          <tr>
+            <th>Coin</th>
+            <th>Reason</th>
+            <th>Blocked At</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </section>
+    <!-- Coin chart modal -->
+    <div id="coin-chart-modal" class="coin-modal" style="display:none;">
+      <div class="coin-modal-backdrop"></div>
+      <div class="coin-modal-content">
+        <div class="coin-modal-header">
+          <h2 id="coin-modal-title">--</h2>
+          <div class="coin-modal-timesel">
+            <button class="time-btn active" data-hours="1">1H</button>
+            <button class="time-btn" data-hours="6">6H</button>
+            <button class="time-btn" data-hours="24">1D</button>
+            <button class="time-btn" data-hours="168">7D</button>
+            <button class="time-btn" data-hours="720">30D</button>
+          </div>
+          <button id="coin-modal-close" class="btn-fullscreen" title="Close">&times;</button>
+        </div>
+        <canvas id="coin-modal-chart"></canvas>
+      </div>
+    </div>
+  </main>
+
+  <script src="app.js?v=39"></script>
+</body>
+</html>

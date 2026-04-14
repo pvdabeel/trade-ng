@@ -1,0 +1,87 @@
+trading:
+  quote_currency: auto  # auto-detects USD vs USDC based on account balance
+  min_24h_volume_usd: 100000
+  candle_granularity: ONE_HOUR
+  trading_interval_sec: 300
+  order_timeout_sec: 60
+  maker_fee_pct: 0.006    # 0.60% maker fee (limit orders) — Coinbase Intro tier
+  taker_fee_pct: 0.012    # 1.20% taker fee (market orders / stop-loss) — Coinbase Intro tier
+
+risk:
+  max_loss_pct: 0.50
+  max_position_pct: 0.20
+  max_concentration_pct: 0.20
+  max_open_positions: 15
+  daily_loss_limit_pct: 0.10
+  hourly_loss_limit_pct: 0.05
+  stop_loss_atr_mult: 2.0
+  take_profit_atr_mult: 2.0
+  watchdog_interval_sec: 30
+  leverage: "disabled"
+  stop_loss_cooldown_minutes: 30  # block re-entry after stop-loss for this many minutes
+
+models:
+  xgboost:
+    retrain_interval_hours: 24
+    lookback_days: 90
+    target_return_threshold: 0.01
+    target_horizon_candles: 6
+  lstm:
+    retrain_interval_hours: 168
+    sequence_length: 60
+    hidden_size: 128
+    num_layers: 2
+    learning_rate: 0.001
+    epochs: 50
+    batch_size: 64
+  ensemble:
+    buy_threshold: 0.6
+    sell_threshold: 0.4
+
+features:
+  rsi_period: 14
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bb_period: 20
+  bb_std: 2
+  atr_period: 14
+  volatility_windows: [5, 10, 20, 50]
+  correlation_window: 30
+
+momentum:
+  scan_interval_sec: 30
+  min_hourly_change_pct: 0.05   # 5% threshold to detect momentum (catch moves earlier)
+  max_position_pct: 0.05        # per momentum trade as % of portfolio
+  max_open_positions: 5         # max concurrent momentum trades
+  trailing_stop_pct: 0.025      # 2.5% trailing stop from highest since entry
+  take_profit_pct: 0.04         # 4% take profit from entry (lock in wins earlier)
+  hard_stop_pct: 0.04           # 4% hard stop-loss from entry (more breathing room)
+  max_hold_minutes: 90          # auto-close after 90 min (cut losers faster)
+  min_volume_usd: 500000        # minimum 24h volume for candidates
+  scale_in_min_change_pct: 0.10 # 10%+ hourly change triggers gradual scale-in
+  scale_in_initial_pct: 0.5    # first buy = 25% of normal budget
+  scale_in_step_pct: 0.5       # each add = 25% of normal budget
+  scale_in_max_pct: 2        # total cap = 150% of normal budget
+  # Pullback re-entry: wait for strong movers to correct before entering
+  pullback_watch_min_pct: 0.08  # 8%+ hourly change → defer entry, watch for pullback
+  pullback_min_drop_pct: 0.03   # price must drop 3% from peak to confirm correction
+  pullback_min_bounce_pct: 0.015 # price must bounce 1.5% off low to signal recovery
+  pullback_watch_ttl_sec: 14400 # give up after 4 hours if no good re-entry
+
+fx:
+  home_currency: EUR
+  max_usd_exposure_pct: 0.40   # max 30% of portfolio in USD/USDC at any time
+  rebalance_threshold_pct: 0.05 # rebalance when exposure drifts 5% beyond target
+  eurc_product_id: EURC-USDC
+  min_rebalance_usd: 10.0        # skip conversions under $5 to avoid fee churn
+
+sync:
+  position_sync_interval_sec: 300  # auto-reconcile positions with Coinbase every 5 min
+
+database:
+  path: "data/trade.db"
+
+api:
+  host: "0.0.0.0"
+  port: 8080
