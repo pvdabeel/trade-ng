@@ -256,7 +256,7 @@ function updatePositions(positions) {
   const frag = document.createDocumentFragment();
   if (!positions.length) {
     const tr = document.createElement('tr');
-    tr.innerHTML = '<td colspan="10" style="color:var(--text-muted);text-align:center;">No open positions</td>';
+    tr.innerHTML = '<td colspan="11" style="color:var(--text-muted);text-align:center;">No open positions</td>';
     frag.appendChild(tr);
     tbody.replaceChildren(frag);
     return;
@@ -271,6 +271,7 @@ function updatePositions(positions) {
       <td class="mono">${fmtPrice(p.current_price)}</td>
       <td class="mono">${fmtSize(p.size)}</td>
       <td class="mono">${fmtUsd(p.value_usd)}</td>
+      <td class="mono">${p.fee != null ? fmtUsd(p.fee) : '--'}</td>
       <td class="mono ${pnlClass}">${fmtUsd(p.unrealized_pnl)}</td>
       <td class="${pnlClass}">${p.unrealized_pnl_pct >= 0 ? '+' : ''}${p.unrealized_pnl_pct.toFixed(1)}%</td>
       <td class="mono">${fmtPrice(p.stop_loss)}</td>

@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 
 from src.data.coinbase_client import CoinbaseClient
-from src.data.database import Database, Position
+from src.data.database import Database, Position, Trade
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ class PositionInfo:
     value_usd: float
     is_open: bool
     strategy: str = "ml"
+    fee: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -42,6 +43,7 @@ class PositionInfo:
             "value_usd": self.value_usd,
             "is_open": self.is_open,
             "strategy": self.strategy,
+            "fee": self.fee,
         }
 
 
@@ -66,6 +68,23 @@ class PortfolioTracker:
         """Build a full portfolio summary with current prices."""
         positions_db = self.db.get_open_positions()
         cash = self.client.get_usd_balance()
+
+        fee_by_product: dict[str, float] = {}
+        try:
+            from sqlalchemy import func
+            with self.db.session() as s:
+                for pos in positions_db:
+                    q = s.query(func.sum(Trade.fee)).filter(
+                        Trade.product_id == pos.product_id,
+                        Trade.side == "BUY",
+                    )
+                    if pos.opened_at:
+                        q = q.filter(Trade.created_at >= pos.opened_at)
+                    result = q.scalar()
+                    if result:
+                        fee_by_product[pos.product_id] = result
+        except Exception:
+            pass
 
         position_infos = []
         total_holdings = 0.0
@@ -100,6 +119,7 @@ class PortfolioTracker:
                 value_usd=value,
                 is_open=True,
                 strategy=getattr(pos, "strategy", "ml") or "ml",
+                fee=fee_by_product.get(pos.product_id, 0.0),
             )
             position_infos.append(info)
             total_holdings += value
