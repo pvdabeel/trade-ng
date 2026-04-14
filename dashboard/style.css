@@ -635,6 +635,34 @@ tr:hover td { background: rgba(91,127,255,0.04); }
   padding-right: 0.5rem;
 }
 
+.untradeable-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+}
+.untradeable-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.7rem;
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--red);
+  font-weight: 600;
+}
+.btn-ut-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  padding: 0;
+  line-height: 1;
+}
+.btn-ut-remove:hover { color: var(--text); }
+
 .badge-eval-hold {
   display: inline-block;
   font-size: 0.6rem;

@@ -15,7 +15,7 @@ from fastapi import APIRouter
 from src.data.coinbase_client import CoinbaseClient
 from src.data.database import Database, Position, Trade
 from src.trading.fx_manager import FXManager
-from src.trading.momentum import MomentumScanner
+from src.trading.momentum import MomentumScanner, UNTRADEABLE_FILE
 from src.trading.portfolio import PortfolioTracker
 
 logger = logging.getLogger("trade-ng.api")
@@ -60,7 +60,7 @@ def _record_decision_yield(
         if matched:
             _DECISION_LOG.write_text(json.dumps(records), encoding="utf-8")
     except Exception as exc:
-        logger.debug("Could not record decision yield for %s: %s", product_id, exc)
+        logger.warning("Could not record decision yield for %s: %s", product_id, exc)
 
 
 def create_router(
@@ -390,6 +390,10 @@ def create_router(
             ],
             "watchlist": watchlist,
             "confidence": confidence,
+            "untradeable": (
+                sorted(momentum_scanner._blacklist) if momentum_scanner
+                else MomentumScanner.get_untradeable()
+            ),
         }
 
     @router.post("/momentum/start")
@@ -408,6 +412,18 @@ def create_router(
             return {"ok": False, "error": "Momentum strategy is disabled"}
         MomentumScanner.request_scan()
         return {"ok": True, "status": "scan triggered"}
+
+    @router.post("/momentum/untradeable/remove/{product_id:path}")
+    def remove_untradeable(product_id: str):
+        if momentum_scanner:
+            momentum_scanner._blacklist.discard(product_id)
+            momentum_scanner._save_untradeable()
+        else:
+            coins = MomentumScanner.get_untradeable()
+            if product_id in coins:
+                coins.remove(product_id)
+                UNTRADEABLE_FILE.write_text(json.dumps(coins), encoding="utf-8")
+        return {"ok": True, "product_id": product_id}
 
     def _close_position_now(product_id: str) -> bool:
         """Sell a position at market and record the trade. Works without a

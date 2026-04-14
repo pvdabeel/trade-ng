@@ -28,6 +28,7 @@ SCAN_TRIGGER_FILE = Path("data/momentum_scan_trigger.flag")
 SCAN_STATS_FILE = Path("data/momentum_scan_stats.json")
 WATCHLIST_FILE = Path("data/momentum_watchlist.json")
 DECISION_LOG_FILE = Path("data/decision_log.json")
+UNTRADEABLE_FILE = Path("data/untradeable_coins.json")
 _DECISION_LOG_MAX = 500
 
 STRATEGY = "momentum"
@@ -212,8 +213,7 @@ class MomentumScanner:
         self._stats = ScanStats()
         self._product_cache: dict = {}
 
-        # Coins that can't be traded at all (permanent for this session)
-        self._blacklist: set[str] = set()
+        self._blacklist: set[str] = self._load_untradeable()
         # Coins on temporary cooldown: product_id -> expiry timestamp
         self._cooldowns: dict[str, float] = {}
         # Candidates waiting for a better entry point
@@ -383,6 +383,38 @@ class MomentumScanner:
         return {}
 
     # ------------------------------------------------------------------
+    # Persistent untradeable coin list
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _load_untradeable() -> set[str]:
+        try:
+            if UNTRADEABLE_FILE.exists():
+                return set(json.loads(UNTRADEABLE_FILE.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+        return set()
+
+    def _save_untradeable(self) -> None:
+        try:
+            UNTRADEABLE_FILE.parent.mkdir(parents=True, exist_ok=True)
+            UNTRADEABLE_FILE.write_text(
+                json.dumps(sorted(self._blacklist)), encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def get_untradeable() -> list[str]:
+        """Return the persisted untradeable coin list (for dashboard)."""
+        try:
+            if UNTRADEABLE_FILE.exists():
+                return json.loads(UNTRADEABLE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return []
+
+    # ------------------------------------------------------------------
     # Decision confidence tracking
     # ------------------------------------------------------------------
 
@@ -396,8 +428,35 @@ class MomentumScanner:
             pass
         return []
 
+    def _merge_yield_from_file(self) -> None:
+        """Import yield fields written to the file by external processes (e.g. dashboard sell)."""
+        try:
+            if not DECISION_LOG_FILE.exists():
+                return
+            raw = json.loads(DECISION_LOG_FILE.read_text(encoding="utf-8"))
+            file_by_key: dict[tuple, dict] = {}
+            for r in raw:
+                if r.get("realized_pnl_pct") is not None:
+                    key = (r["product_id"], r["timestamp"], r["decision"])
+                    file_by_key[key] = r
+            if not file_by_key:
+                return
+            for rec in self._decision_log:
+                if rec.realized_pnl_pct is not None:
+                    continue
+                key = (rec.product_id, rec.timestamp, rec.decision)
+                fr = file_by_key.get(key)
+                if fr and fr.get("realized_pnl_pct") is not None:
+                    rec.realized_pnl_pct = fr["realized_pnl_pct"]
+                    rec.exit_reason = fr.get("exit_reason")
+                    rec.hold_seconds = fr.get("hold_seconds")
+                    rec.entry_fee_pct = fr.get("entry_fee_pct")
+        except Exception:
+            pass
+
     def _save_decision_log(self) -> None:
         try:
+            self._merge_yield_from_file()
             trimmed = self._decision_log[-_DECISION_LOG_MAX:]
             data = [asdict(r) for r in trimmed]
             DECISION_LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -1817,6 +1876,7 @@ class MomentumScanner:
             err_msg = str(e).lower()
             if any(ue in err_msg for ue in _UNTRADEABLE_ERRORS):
                 self._blacklist.add(product_id)
+                self._save_untradeable()
                 logger.warning("Momentum: blacklisted %s (untradeable: %s)", product_id, e)
             else:
                 logger.error("Momentum buy failed %s: %s", product_id, e)
@@ -1826,6 +1886,7 @@ class MomentumScanner:
             raw_str = str(result.raw).lower() if result.raw else ""
             if any(ue in raw_str for ue in _UNTRADEABLE_ERRORS):
                 self._blacklist.add(product_id)
+                self._save_untradeable()
                 logger.warning("Momentum: blacklisted %s (untradeable)", product_id)
             elif "insufficient" in raw_str:
                 logger.warning("Momentum buy rejected %s: insufficient funds", product_id)

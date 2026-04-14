@@ -1565,6 +1565,31 @@ async function updateMomentum() {
     }
     dlBody.replaceChildren(dlFrag);
   }
+
+  // Untradeable coins
+  const untradeable = data.untradeable || [];
+  const utSubtitle = $('#untradeable-subtitle');
+  const utBar = $('#untradeable-bar');
+  if (utBar) {
+    if (untradeable.length > 0) {
+      if (utSubtitle) utSubtitle.style.display = '';
+      utBar.innerHTML = untradeable.map(pid => {
+        const label = pid.replace('-USDC', '');
+        return `<span class="untradeable-chip">${label} <button class="btn-ut-remove" data-pid="${pid}" title="Remove from untradeable">&times;</button></span>`;
+      }).join('');
+      utBar.querySelectorAll('.btn-ut-remove').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const pid = btn.dataset.pid;
+          btn.disabled = true;
+          await fetch(API + '/momentum/untradeable/remove/' + encodeURIComponent(pid), { method: 'POST' });
+          setTimeout(refresh, 500);
+        });
+      });
+    } else {
+      if (utSubtitle) utSubtitle.style.display = 'none';
+      utBar.innerHTML = '';
+    }
+  }
 }
 
 // ---- Fullscreen toggle ----
