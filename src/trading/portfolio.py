@@ -84,7 +84,8 @@ class PortfolioTracker:
                         Trade.side == "BUY",
                     )
                     if pos.opened_at:
-                        q = q.filter(Trade.created_at >= pos.opened_at)
+                        buffer = dt.timedelta(seconds=5)
+                        q = q.filter(Trade.created_at >= pos.opened_at - buffer)
                     result = q.scalar()
                     if result:
                         fee_by_product[pos.product_id] = result

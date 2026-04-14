@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import threading
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter
 
@@ -17,6 +19,48 @@ from src.trading.momentum import MomentumScanner
 from src.trading.portfolio import PortfolioTracker
 
 logger = logging.getLogger("trade-ng.api")
+
+_DECISION_LOG = Path("data/decision_log.json")
+
+
+def _record_decision_yield(
+    product_id: str,
+    entry_price: float,
+    size: float,
+    opened_at: dt.datetime | None,
+    net_pnl: float,
+    exit_fee: float,
+    reason: str,
+) -> None:
+    """Update the decision log file with realized yield for an enter decision."""
+    try:
+        if not _DECISION_LOG.exists():
+            return
+        records = json.loads(_DECISION_LOG.read_text(encoding="utf-8"))
+        entry_value = entry_price * size
+        if entry_value <= 0:
+            return
+        pnl_pct = round(net_pnl / entry_value, 4)
+        hold_sec = 0
+        if opened_at:
+            hold_sec = int((dt.datetime.utcnow() - opened_at).total_seconds())
+        fee_pct = round((exit_fee * 2) / entry_value, 4)
+
+        matched = False
+        for rec in reversed(records):
+            if (rec.get("product_id") == product_id
+                    and rec.get("decision") == "enter"
+                    and rec.get("realized_pnl_pct") is None):
+                rec["realized_pnl_pct"] = pnl_pct
+                rec["exit_reason"] = reason
+                rec["hold_seconds"] = hold_sec
+                rec["entry_fee_pct"] = fee_pct
+                matched = True
+                break
+        if matched:
+            _DECISION_LOG.write_text(json.dumps(records), encoding="utf-8")
+    except Exception as exc:
+        logger.debug("Could not record decision yield for %s: %s", product_id, exc)
 
 
 def create_router(
@@ -413,6 +457,11 @@ def create_router(
             )
             db.save_trade(trade)
             db.close_position(product_id, net_pnl)
+            _record_decision_yield(
+                product_id, pos.entry_price, pos.size,
+                pos.opened_at, net_pnl, taker_fee,
+                "manual close (dashboard)",
+            )
             logger.info(
                 "CLOSE %s via dashboard: gross=$%.2f fee=$%.4f net=$%.2f",
                 product_id, gross_pnl, taker_fee, net_pnl,
@@ -508,6 +557,12 @@ def create_router(
             )
             db.save_trade(trade)
             db.close_position(product_id, net_pnl)
+            if strategy == "momentum":
+                _record_decision_yield(
+                    product_id, pos.entry_price, pos.size,
+                    pos.opened_at, net_pnl, taker_fee,
+                    "manual sell (dashboard)",
+                )
             logger.info(
                 "SELL %s via dashboard: gross=$%.2f fee=$%.4f net=$%.2f",
                 product_id,
